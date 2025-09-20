@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Token, TokenAccount, Transfer, Mint};
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
@@ -44,11 +44,7 @@ pub mod reward_pool {
             .ok_or(ErrorCode::MathOverflow)?;
         
         msg!("Deposited {} tokens to reward pool", amount);
-        
-        // Automatically trigger distribution if we have top holders registered
-        if !pool.top_holders.is_empty() {
-            distribute_rewards_internal(ctx.remaining_accounts, pool, amount)?;
-        }
+        msg!("Call distribute_rewards separately to distribute to holders");
         
         Ok(())
     }
@@ -79,7 +75,7 @@ pub mod reward_pool {
         Ok(())
     }
 
-    /// Distribute rewards to top holders (can be called manually or automatically)
+    /// Distribute rewards to top holders (must provide holder token accounts)
     pub fn distribute_rewards(ctx: Context<DistributeRewards>) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         let available_rewards = ctx.accounts.pool_vault.amount;
@@ -89,8 +85,79 @@ pub mod reward_pool {
             return Ok(());
         }
         
-        distribute_rewards_internal(ctx.remaining_accounts, pool, available_rewards)?;
+        if pool.top_holders.is_empty() {
+            msg!("No top holders registered for distribution");
+            return Ok(());
+        }
         
+        // Verify we have enough remaining accounts (must match top holders count)
+        require!(
+            ctx.remaining_accounts.len() >= pool.top_holders.len(),
+            ErrorCode::InsufficientAccounts
+        );
+        
+        // Calculate total balance of top holders
+        let total_balance: u64 = pool.top_holders.iter().map(|h| h.balance).sum();
+        
+        if total_balance == 0 {
+            msg!("Total balance of holders is zero");
+            return Ok(());
+        }
+
+        let seeds = &[b"pool", pool.token_mint.as_ref(), &[pool.bump]];
+        let signer = &[&seeds[..]];
+        
+        let mut total_distributed = 0u64;
+
+        // Distribute proportionally to each holder
+        for (i, holder) in pool.top_holders.iter().enumerate() {
+            let holder_share = (available_rewards as u128)
+                .checked_mul(holder.balance as u128)
+                .ok_or(ErrorCode::MathOverflow)?
+                .checked_div(total_balance as u128)
+                .ok_or(ErrorCode::MathOverflow)? as u64;
+            
+            if holder_share > 0 && i < ctx.remaining_accounts.len() {
+                // Validate that the recipient token account belongs to the holder
+                let recipient_account = &ctx.remaining_accounts[i];
+                
+                // Parse as token account to verify ownership and mint
+                let recipient_token_account = TokenAccount::try_deserialize(&mut &recipient_account.data.borrow()[..])?;
+                
+                // Verify the token account belongs to the correct holder
+                require!(
+                    recipient_token_account.owner == holder.address,
+                    ErrorCode::InvalidRecipient
+                );
+                
+                // Verify the token account has correct mint
+                require!(
+                    recipient_token_account.mint == pool.token_mint,
+                    ErrorCode::InvalidMint
+                );
+                
+                // Transfer tokens from pool vault to holder
+                let cpi_accounts = Transfer {
+                    from: ctx.accounts.pool_vault.to_account_info(),
+                    to: recipient_account.clone(),
+                    authority: ctx.accounts.pool.to_account_info(),
+                };
+                let cpi_program = ctx.accounts.token_program.to_account_info();
+                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+                
+                token::transfer(cpi_ctx, holder_share)?;
+                
+                total_distributed = total_distributed.checked_add(holder_share)
+                    .ok_or(ErrorCode::MathOverflow)?;
+                
+                msg!("Transferred {} tokens to holder {}", holder_share, holder.address);
+            }
+        }
+
+        pool.total_distributed = pool.total_distributed.checked_add(total_distributed)
+            .ok_or(ErrorCode::MathOverflow)?;
+        
+        msg!("Distributed {} tokens to {} holders", total_distributed, pool.top_holders.len());
         Ok(())
     }
 
@@ -123,49 +190,6 @@ pub mod reward_pool {
 
 }
 
-// Internal function to handle reward distribution logic
-fn distribute_rewards_internal(
-        remaining_accounts: &[AccountInfo],
-        pool: &mut RewardPool,
-        total_amount: u64,
-    ) -> Result<()> {
-        if pool.top_holders.is_empty() {
-            msg!("No top holders registered for distribution");
-            return Ok(());
-        }
-
-        // Calculate total balance of top holders
-        let total_balance: u64 = pool.top_holders.iter().map(|h| h.balance).sum();
-        
-        if total_balance == 0 {
-            msg!("Total balance of holders is zero");
-            return Ok(());
-        }
-
-        // Distribute proportionally to each holder
-        for (i, holder) in pool.top_holders.iter().enumerate() {
-            if i >= remaining_accounts.len() {
-                break; // Not enough remaining accounts provided
-            }
-            
-            let holder_share = (total_amount as u128)
-                .checked_mul(holder.balance as u128)
-                .ok_or(ErrorCode::MathOverflow)?
-                .checked_div(total_balance as u128)
-                .ok_or(ErrorCode::MathOverflow)? as u64;
-            
-            if holder_share > 0 && i < remaining_accounts.len() {
-                // Transfer to holder (would need proper CPI transfer here)
-                msg!("Would transfer {} tokens to holder {}", holder_share, holder.address);
-            }
-        }
-
-        pool.total_distributed = pool.total_distributed.checked_add(total_amount)
-            .ok_or(ErrorCode::MathOverflow)?;
-        
-        msg!("Distributed {} tokens to {} holders", total_amount, pool.top_holders.len());
-        Ok(())
-    }
 
 #[derive(Accounts)]
 pub struct InitializePool<'info> {
@@ -188,8 +212,7 @@ pub struct InitializePool<'info> {
     )]
     pub pool_vault: Account<'info, TokenAccount>,
     
-    /// CHECK: Token mint address
-    pub token_mint: AccountInfo<'info>,
+    pub token_mint: Account<'info, Mint>,
     
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -211,11 +234,15 @@ pub struct DepositRewards<'info> {
     #[account(
         mut,
         seeds = [b"vault", pool.token_mint.as_ref()],
-        bump
+        bump,
+        constraint = pool_vault.mint == pool.token_mint.key()
     )]
     pub pool_vault: Account<'info, TokenAccount>,
     
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = depositor_token_account.mint == pool.token_mint.key()
+    )]
     pub depositor_token_account: Account<'info, TokenAccount>,
     
     pub depositor: Signer<'info>,
@@ -265,11 +292,15 @@ pub struct OwnerWithdraw<'info> {
     #[account(
         mut,
         seeds = [b"vault", pool.token_mint.as_ref()],
-        bump
+        bump,
+        constraint = pool_vault.mint == pool.token_mint.key()
     )]
     pub pool_vault: Account<'info, TokenAccount>,
     
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = owner_token_account.mint == pool.token_mint.key()
+    )]
     pub owner_token_account: Account<'info, TokenAccount>,
     
     #[account(constraint = owner.key() == pool.owner)]
@@ -316,4 +347,10 @@ pub enum ErrorCode {
     TooManyHolders,
     #[msg("Unauthorized access")]
     Unauthorized,
+    #[msg("Insufficient accounts provided for distribution")]
+    InsufficientAccounts,
+    #[msg("Invalid recipient token account")]
+    InvalidRecipient,
+    #[msg("Invalid token mint")]
+    InvalidMint,
 }
