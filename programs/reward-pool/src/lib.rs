@@ -10,18 +10,17 @@ pub mod reward_pool {
     /// Initialize a new reward pool
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
-        token_mint: Pubkey,
         pool_owner: Pubkey,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.owner = pool_owner;
-        pool.token_mint = token_mint;
+        pool.token_mint = ctx.accounts.token_mint.key();
         pool.total_rewards = 0;
         pool.total_distributed = 0;
         pool.top_holders = Vec::with_capacity(10);
         pool.bump = ctx.bumps.pool;
         
-        msg!("Reward pool initialized for token: {}", token_mint);
+        msg!("Reward pool initialized for token: {}", ctx.accounts.token_mint.key());
         Ok(())
     }
 
@@ -120,6 +119,12 @@ pub mod reward_pool {
             if holder_share > 0 && i < ctx.remaining_accounts.len() {
                 // Validate that the recipient token account belongs to the holder
                 let recipient_account = &ctx.remaining_accounts[i];
+                
+                // Verify account is owned by token program
+                require!(
+                    recipient_account.owner == &ctx.accounts.token_program.key(),
+                    ErrorCode::InvalidTokenProgram
+                );
                 
                 // Parse as token account to verify ownership and mint
                 let recipient_token_account = TokenAccount::try_deserialize(&mut &recipient_account.data.borrow()[..])?;
@@ -353,4 +358,6 @@ pub enum ErrorCode {
     InvalidRecipient,
     #[msg("Invalid token mint")]
     InvalidMint,
+    #[msg("Account not owned by token program")]
+    InvalidTokenProgram,
 }
