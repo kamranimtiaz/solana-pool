@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Token, TokenAccount, Transfer, Mint};
+use anchor_lang::system_program;
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
@@ -7,46 +7,23 @@ declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 pub mod reward_pool {
     use super::*;
 
-    /// Initialize a new reward pool
+    /// Initialize a new reward pool for SOL rewards
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
         pool_owner: Pubkey,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.owner = pool_owner;
-        pool.token_mint = ctx.accounts.token_mint.key();
         pool.total_rewards = 0;
         pool.total_distributed = 0;
         pool.top_holders = Vec::with_capacity(10);
         pool.bump = ctx.bumps.pool;
+        pool.vault_bump = ctx.bumps.pool_vault;
         
-        msg!("Reward pool initialized for token: {}", ctx.accounts.token_mint.key());
+        msg!("SOL reward pool initialized with owner: {}", pool_owner);
         Ok(())
     }
 
-    /// Deposit rewards into the pool (called when creator fees arrive)
-    pub fn deposit_rewards(ctx: Context<DepositRewards>, amount: u64) -> Result<()> {
-        let pool = &mut ctx.accounts.pool;
-        
-        // Transfer tokens from depositor to pool vault
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.depositor_token_account.to_account_info(),
-            to: ctx.accounts.pool_vault.to_account_info(),
-            authority: ctx.accounts.depositor.to_account_info(),
-        };
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
-        
-        token::transfer(cpi_ctx, amount)?;
-        
-        pool.total_rewards = pool.total_rewards.checked_add(amount)
-            .ok_or(ErrorCode::MathOverflow)?;
-        
-        msg!("Deposited {} tokens to reward pool", amount);
-        msg!("Call distribute_rewards separately to distribute to holders");
-        
-        Ok(())
-    }
 
     /// Register/update top token holders (called periodically or by external script)
     pub fn update_top_holders(
@@ -74,13 +51,13 @@ pub mod reward_pool {
         Ok(())
     }
 
-    /// Distribute rewards to top holders (must provide holder token accounts)
+    /// Distribute SOL rewards to top holders (must provide holder wallet addresses)
     pub fn distribute_rewards(ctx: Context<DistributeRewards>) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
-        let available_rewards = ctx.accounts.pool_vault.amount;
+        let available_rewards = ctx.accounts.pool_vault.lamports();
         
         if available_rewards == 0 {
-            msg!("No rewards to distribute");
+            msg!("No SOL rewards to distribute");
             return Ok(());
         }
         
@@ -95,6 +72,10 @@ pub mod reward_pool {
             ErrorCode::InsufficientAccounts
         );
         
+        // Update total_rewards to current vault balance + already distributed
+        pool.total_rewards = available_rewards.checked_add(pool.total_distributed)
+            .ok_or(ErrorCode::MathOverflow)?;
+        
         // Calculate total balance of top holders
         let total_balance: u64 = pool.top_holders.iter().map(|h| h.balance).sum();
         
@@ -103,7 +84,7 @@ pub mod reward_pool {
             return Ok(());
         }
 
-        let seeds = &[b"pool", pool.token_mint.as_ref(), &[pool.bump]];
+        let seeds = &[b"vault", &[pool.vault_bump]];
         let signer = &[&seeds[..]];
         
         let mut total_distributed = 0u64;
@@ -117,56 +98,43 @@ pub mod reward_pool {
                 .ok_or(ErrorCode::MathOverflow)? as u64;
             
             if holder_share > 0 && i < ctx.remaining_accounts.len() {
-                // Validate that the recipient token account belongs to the holder
                 let recipient_account = &ctx.remaining_accounts[i];
                 
-                // Verify account is owned by token program
+                // Verify the recipient is the expected holder address
                 require!(
-                    recipient_account.owner == &ctx.accounts.token_program.key(),
-                    ErrorCode::InvalidTokenProgram
-                );
-                
-                // Parse as token account to verify ownership and mint
-                let recipient_token_account = TokenAccount::try_deserialize(&mut &recipient_account.data.borrow()[..])?;
-                
-                // Verify the token account belongs to the correct holder
-                require!(
-                    recipient_token_account.owner == holder.address,
+                    recipient_account.key() == holder.address,
                     ErrorCode::InvalidRecipient
                 );
                 
-                // Verify the token account has correct mint
-                require!(
-                    recipient_token_account.mint == pool.token_mint,
-                    ErrorCode::InvalidMint
-                );
-                
-                // Transfer tokens from pool vault to holder
-                let cpi_accounts = Transfer {
+                // Transfer SOL from pool vault to holder
+                let transfer_instruction = system_program::Transfer {
                     from: ctx.accounts.pool_vault.to_account_info(),
                     to: recipient_account.clone(),
-                    authority: ctx.accounts.pool.to_account_info(),
                 };
-                let cpi_program = ctx.accounts.token_program.to_account_info();
-                let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
                 
-                token::transfer(cpi_ctx, holder_share)?;
+                let cpi_ctx = CpiContext::new_with_signer(
+                    ctx.accounts.system_program.to_account_info(),
+                    transfer_instruction,
+                    signer,
+                );
+                
+                system_program::transfer(cpi_ctx, holder_share)?;
                 
                 total_distributed = total_distributed.checked_add(holder_share)
                     .ok_or(ErrorCode::MathOverflow)?;
                 
-                msg!("Transferred {} tokens to holder {}", holder_share, holder.address);
+                msg!("Transferred {} lamports to holder {}", holder_share, holder.address);
             }
         }
 
         pool.total_distributed = pool.total_distributed.checked_add(total_distributed)
             .ok_or(ErrorCode::MathOverflow)?;
         
-        msg!("Distributed {} tokens to {} holders", total_distributed, pool.top_holders.len());
+        msg!("Distributed {} lamports to {} holders", total_distributed, pool.top_holders.len());
         Ok(())
     }
 
-    /// Pool owner can withdraw funds (emergency function)
+    /// Pool owner can withdraw SOL funds (emergency function)
     pub fn owner_withdraw(ctx: Context<OwnerWithdraw>, amount: u64) -> Result<()> {
         let pool = &ctx.accounts.pool;
         
@@ -175,21 +143,30 @@ pub mod reward_pool {
             ErrorCode::Unauthorized
         );
         
-        // Transfer tokens from pool vault to owner
-        let seeds = &[b"pool", pool.token_mint.as_ref(), &[pool.bump]];
+        // Check sufficient balance
+        require!(
+            amount <= ctx.accounts.pool_vault.lamports(),
+            ErrorCode::InsufficientBalance
+        );
+        
+        // Transfer SOL from pool vault to owner
+        let seeds = &[b"vault", &[pool.vault_bump]];
         let signer = &[&seeds[..]];
         
-        let cpi_accounts = Transfer {
+        let transfer_instruction = system_program::Transfer {
             from: ctx.accounts.pool_vault.to_account_info(),
-            to: ctx.accounts.owner_token_account.to_account_info(),
-            authority: ctx.accounts.pool.to_account_info(),
+            to: ctx.accounts.owner.to_account_info(),
         };
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
         
-        token::transfer(cpi_ctx, amount)?;
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.system_program.to_account_info(),
+            transfer_instruction,
+            signer,
+        );
         
-        msg!("Pool owner withdrew {} tokens", amount);
+        system_program::transfer(cpi_ctx, amount)?;
+        
+        msg!("Pool owner withdrew {} lamports", amount);
         Ok(())
     }
 
@@ -202,63 +179,33 @@ pub struct InitializePool<'info> {
         init,
         payer = payer,
         space = RewardPool::SPACE,
-        seeds = [b"pool", token_mint.key().as_ref()],
+        seeds = [b"pool"],
         bump
     )]
     pub pool: Account<'info, RewardPool>,
     
+    /// CHECK: This PDA will receive SOL rewards automatically from Pump.fun
     #[account(
         init,
         payer = payer,
-        token::mint = token_mint,
-        token::authority = pool,
-        seeds = [b"vault", token_mint.key().as_ref()],
-        bump
+        seeds = [b"vault"],
+        bump,
+        space = 0
     )]
-    pub pool_vault: Account<'info, TokenAccount>,
-    
-    pub token_mint: Account<'info, Mint>,
+    pub pool_vault: SystemAccount<'info>,
     
     #[account(mut)]
     pub payer: Signer<'info>,
     
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-    pub rent: Sysvar<'info, Rent>,
 }
 
-#[derive(Accounts)]
-pub struct DepositRewards<'info> {
-    #[account(
-        mut,
-        seeds = [b"pool", pool.token_mint.as_ref()],
-        bump = pool.bump
-    )]
-    pub pool: Account<'info, RewardPool>,
-    
-    #[account(
-        mut,
-        seeds = [b"vault", pool.token_mint.as_ref()],
-        bump,
-        constraint = pool_vault.mint == pool.token_mint.key()
-    )]
-    pub pool_vault: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        constraint = depositor_token_account.mint == pool.token_mint.key()
-    )]
-    pub depositor_token_account: Account<'info, TokenAccount>,
-    
-    pub depositor: Signer<'info>,
-    pub token_program: Program<'info, Token>,
-}
 
 #[derive(Accounts)]
 pub struct UpdateTopHolders<'info> {
     #[account(
         mut,
-        seeds = [b"pool", pool.token_mint.as_ref()],
+        seeds = [b"pool"],
         bump = pool.bump
     )]
     pub pool: Account<'info, RewardPool>,
@@ -270,68 +217,63 @@ pub struct UpdateTopHolders<'info> {
 pub struct DistributeRewards<'info> {
     #[account(
         mut,
-        seeds = [b"pool", pool.token_mint.as_ref()],
+        seeds = [b"pool"],
         bump = pool.bump
     )]
     pub pool: Account<'info, RewardPool>,
     
+    /// CHECK: This PDA holds SOL rewards
     #[account(
         mut,
-        seeds = [b"vault", pool.token_mint.as_ref()],
-        bump
+        seeds = [b"vault"],
+        bump = pool.vault_bump
     )]
-    pub pool_vault: Account<'info, TokenAccount>,
+    pub pool_vault: SystemAccount<'info>,
     
-    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct OwnerWithdraw<'info> {
     #[account(
         mut,
-        seeds = [b"pool", pool.token_mint.as_ref()],
+        seeds = [b"pool"],
         bump = pool.bump
     )]
     pub pool: Account<'info, RewardPool>,
     
+    /// CHECK: This PDA holds SOL rewards
     #[account(
         mut,
-        seeds = [b"vault", pool.token_mint.as_ref()],
-        bump,
-        constraint = pool_vault.mint == pool.token_mint.key()
+        seeds = [b"vault"],
+        bump = pool.vault_bump
     )]
-    pub pool_vault: Account<'info, TokenAccount>,
-    
-    #[account(
-        mut,
-        constraint = owner_token_account.mint == pool.token_mint.key()
-    )]
-    pub owner_token_account: Account<'info, TokenAccount>,
+    pub pool_vault: SystemAccount<'info>,
     
     #[account(constraint = owner.key() == pool.owner)]
     pub owner: Signer<'info>,
     
-    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[account]
 pub struct RewardPool {
     pub owner: Pubkey,              // Pool owner who can withdraw
-    pub token_mint: Pubkey,         // Token mint for this pool
     pub total_rewards: u64,         // Total rewards ever deposited
     pub total_distributed: u64,     // Total rewards distributed
     pub top_holders: Vec<HolderInfo>, // Top 10 token holders
-    pub bump: u8,                   // PDA bump
+    pub bump: u8,                   // Pool PDA bump
+    pub vault_bump: u8,             // Vault PDA bump
 }
 
 impl RewardPool {
     pub const SPACE: usize = 8 + // discriminator
         32 + // owner
-        32 + // token_mint
         8 +  // total_rewards
         8 +  // total_distributed
         4 + (10 * HolderInfo::SPACE) + // top_holders (max 10)
-        1;   // bump
+        1 +  // bump
+        1;   // vault_bump
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -354,10 +296,8 @@ pub enum ErrorCode {
     Unauthorized,
     #[msg("Insufficient accounts provided for distribution")]
     InsufficientAccounts,
-    #[msg("Invalid recipient token account")]
+    #[msg("Invalid recipient account")]
     InvalidRecipient,
-    #[msg("Invalid token mint")]
-    InvalidMint,
-    #[msg("Account not owned by token program")]
-    InvalidTokenProgram,
+    #[msg("Insufficient balance for withdrawal")]
+    InsufficientBalance,
 }

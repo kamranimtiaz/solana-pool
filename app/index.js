@@ -1,12 +1,11 @@
 /**
- * Reward Pool Solana Program - Demo Application
+ * SOL Reward Pool Solana Program - Demo Application
  * 
- * This application demonstrates the reward pool functionality for automatically
- * distributing Pump.fun creator rewards to top 10 token holders.
+ * This application demonstrates the SOL reward pool functionality for automatically
+ * distributing Pump.fun creator rewards (in SOL) to top 10 token holders.
  */
 
-const { Connection, PublicKey, clusterApiUrl } = require('@solana/web3.js');
-const { TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const { Connection, PublicKey, clusterApiUrl, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 
 // Configuration
 const PROGRAM_ID = new PublicKey('Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS');
@@ -19,52 +18,50 @@ class RewardPoolManager {
     }
 
     /**
-     * Initialize a new reward pool for a token
-     * @param {PublicKey} tokenMint - The token mint address
+     * Initialize a new SOL reward pool
      * @param {PublicKey} owner - Pool owner public key
      */
-    async initializePool(tokenMint, owner) {
-        console.log(`\n🚀 Initializing reward pool for token: ${tokenMint.toString()}`);
+    async initializePool(owner) {
+        console.log(`\n🚀 Initializing SOL reward pool`);
         console.log(`Pool owner: ${owner.toString()}`);
         
         // Calculate pool PDA (Program Derived Address)
         const [poolPDA] = await PublicKey.findProgramAddressSync(
-            [Buffer.from('pool'), tokenMint.toBuffer()],
+            [Buffer.from('pool')],
             PROGRAM_ID
         );
         
-        // Calculate vault PDA
+        // Calculate vault PDA (this will receive SOL automatically from Pump.fun)
         const [vaultPDA] = await PublicKey.findProgramAddressSync(
-            [Buffer.from('vault'), tokenMint.toBuffer()],
+            [Buffer.from('vault')],
             PROGRAM_ID
         );
         
         console.log(`📍 Pool PDA: ${poolPDA.toString()}`);
         console.log(`🏦 Vault PDA: ${vaultPDA.toString()}`);
+        console.log(`💡 Set this vault address as your Pump.fun creator wallet!`);
         
         return {
             poolPDA,
             vaultPDA,
-            tokenMint,
             owner
         };
     }
 
     /**
-     * Simulate depositing rewards into the pool
+     * Simulate Pump.fun automatically depositing SOL rewards into the vault
      * @param {Object} poolInfo - Pool information
-     * @param {number} amount - Amount to deposit
+     * @param {number} solAmount - Amount in SOL to simulate
      */
-    async depositRewards(poolInfo, amount) {
-        console.log(`\n💰 Depositing ${amount} tokens to reward pool`);
-        console.log(`Pool: ${poolInfo.poolPDA.toString()}`);
+    async simulateSOLDeposit(poolInfo, solAmount) {
+        console.log(`\n💰 Pump.fun automatically deposited ${solAmount} SOL to vault`);
+        console.log(`Vault: ${poolInfo.vaultPDA.toString()}`);
         
-        // In a real implementation, this would create a transaction to call
-        // the deposit_rewards instruction on the Solana program
-        console.log('✅ Rewards deposited successfully');
+        // In reality, Pump.fun would send SOL directly to the vault PDA
+        // No instruction call needed - it's automatic!
+        console.log('✅ SOL rewards received automatically');
         
-        // Simulate automatic distribution trigger
-        await this.simulateDistribution(amount);
+        console.log(`💡 Call distribute_rewards to send rewards to top holders`);
     }
 
     /**
@@ -88,11 +85,11 @@ class RewardPoolManager {
     }
 
     /**
-     * Simulate reward distribution to top holders
-     * @param {number} totalAmount - Total amount to distribute
+     * Simulate SOL reward distribution to top holders
+     * @param {number} totalSOL - Total SOL amount to distribute
      */
-    async simulateDistribution(totalAmount) {
-        console.log(`\n🎁 Distributing ${totalAmount} tokens to top holders:`);
+    async simulateDistribution(totalSOL) {
+        console.log(`\n🎁 Distributing ${totalSOL} SOL to top holders:`);
         
         // Mock top holders for demonstration
         const mockHolders = [
@@ -107,22 +104,22 @@ class RewardPoolManager {
         
         console.log('Distribution breakdown:');
         mockHolders.forEach((holder, index) => {
-            const share = Math.floor((totalAmount * holder.balance) / totalBalance);
-            console.log(`${index + 1}. ${holder.address}: ${share} tokens (${((holder.balance / totalBalance) * 100).toFixed(2)}%)`);
+            const shareSOL = (totalSOL * holder.balance) / totalBalance;
+            console.log(`${index + 1}. ${holder.address}: ${shareSOL.toFixed(4)} SOL (${((holder.balance / totalBalance) * 100).toFixed(2)}%)`);
         });
         
-        console.log('✅ Distribution completed successfully');
+        console.log('✅ SOL distribution completed successfully');
     }
 
     /**
-     * Demonstrate pool owner withdrawal
+     * Demonstrate pool owner SOL withdrawal
      * @param {Object} poolInfo - Pool information
-     * @param {number} amount - Amount to withdraw
+     * @param {number} solAmount - Amount in SOL to withdraw
      */
-    async ownerWithdraw(poolInfo, amount) {
-        console.log(`\n🏧 Pool owner withdrawing ${amount} tokens`);
+    async ownerWithdraw(poolInfo, solAmount) {
+        console.log(`\n🏧 Pool owner withdrawing ${solAmount} SOL`);
         console.log(`Owner: ${poolInfo.owner.toString()}`);
-        console.log('✅ Withdrawal completed successfully');
+        console.log('✅ SOL withdrawal completed successfully');
     }
 
     /**
@@ -130,31 +127,29 @@ class RewardPoolManager {
      * @param {Object} poolInfo - Pool information
      */
     async displayPoolStats(poolInfo) {
-        console.log(`\n📊 Pool Statistics:`);
-        console.log(`Token Mint: ${poolInfo.tokenMint.toString()}`);
+        console.log(`\n📊 SOL Pool Statistics:`);
         console.log(`Pool Address: ${poolInfo.poolPDA.toString()}`);
         console.log(`Vault Address: ${poolInfo.vaultPDA.toString()}`);
         console.log(`Owner: ${poolInfo.owner.toString()}`);
-        console.log(`Total Rewards Received: 5000 tokens (simulated)`);
-        console.log(`Total Distributed: 3000 tokens (simulated)`);
-        console.log(`Available Balance: 2000 tokens (simulated)`);
+        console.log(`Total SOL Rewards Received: 5.0 SOL (simulated)`);
+        console.log(`Total SOL Distributed: 3.0 SOL (simulated)`);
+        console.log(`Available SOL Balance: 2.0 SOL (simulated)`);
     }
 }
 
-// Demo function to showcase the reward pool functionality
+// Demo function to showcase the SOL reward pool functionality
 async function runDemo() {
-    console.log('🎯 Pump.fun Reward Pool Demo');
+    console.log('🎯 Pump.fun SOL Reward Pool Demo');
     console.log('='.repeat(50));
     
     const manager = new RewardPoolManager();
     
-    // Mock token mint and owner addresses
-    const tokenMint = new PublicKey('11111111111111111111111111111112'); // System program as example
+    // Mock pool owner address
     const poolOwner = new PublicKey('11111111111111111111111111111112'); // System program as example
     
     try {
-        // 1. Initialize the reward pool
-        const poolInfo = await manager.initializePool(tokenMint, poolOwner);
+        // 1. Initialize the SOL reward pool
+        const poolInfo = await manager.initializePool(poolOwner);
         
         // 2. Update top holders (normally done by external monitoring script)
         const holders = [
@@ -172,21 +167,25 @@ async function runDemo() {
         
         await manager.updateTopHolders(holders);
         
-        // 3. Simulate creator fees being deposited (automatic from Pump.fun)
-        await manager.depositRewards(poolInfo, 1000);
+        // 3. Simulate Pump.fun automatically depositing SOL rewards to vault
+        await manager.simulateSOLDeposit(poolInfo, 1.0); // 1 SOL
         
-        // 4. Show pool statistics
+        // 4. Simulate distribution to top holders  
+        await manager.simulateDistribution(1.0); // 1 SOL
+        
+        // 5. Show pool statistics
         await manager.displayPoolStats(poolInfo);
         
-        // 5. Demonstrate owner withdrawal capability
-        await manager.ownerWithdraw(poolInfo, 500);
+        // 6. Demonstrate owner withdrawal capability
+        await manager.ownerWithdraw(poolInfo, 0.5); // 0.5 SOL
         
         console.log(`\n✨ Demo completed successfully!`);
         console.log('\n📝 Next Steps:');
         console.log('1. Deploy the Solana program to devnet/mainnet');
         console.log('2. Set up monitoring for token holder balances');
-        console.log('3. Configure Pump.fun creator wallet to point to pool address');
-        console.log('4. Test with real token and holders');
+        console.log('3. Configure Pump.fun creator wallet to point to vault PDA');
+        console.log('4. Test with real token holders and SOL rewards');
+        console.log('5. Call distribute_rewards periodically to send rewards to holders');
         
     } catch (error) {
         console.error('❌ Demo failed:', error.message);
