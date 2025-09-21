@@ -2,7 +2,7 @@
  * SOL Reward Pool Solana Program - Demo Application
  * 
  * This application demonstrates the SOL reward pool functionality for automatically
- * distributing Pump.fun creator rewards (in SOL) to top 10 token holders.
+ * distributing Pump.fun creator rewards (in SOL) equally to top 20 token holders.
  */
 
 const { Connection, PublicKey, clusterApiUrl, LAMPORTS_PER_SOL } = require('@solana/web3.js');
@@ -65,50 +65,72 @@ class RewardPoolManager {
     }
 
     /**
-     * Update the top 10 token holders
+     * Update the top 20 token holders
      * @param {Array} holders - Array of holder information
      */
     async updateTopHolders(holders) {
-        console.log(`\n👥 Updating top ${holders.length} token holders:`);
+        console.log(`\n👥 Updating top 20 token holders:`);
         
-        // Sort holders by balance (descending) and take top 10
+        // Sort holders by balance (descending) and take top 20
         const topHolders = holders
             .sort((a, b) => b.balance - a.balance)
-            .slice(0, 10);
+            .slice(0, 20);
         
-        topHolders.forEach((holder, index) => {
+        console.log(`First 10 of ${topHolders.length} holders:`);
+        topHolders.slice(0, 10).forEach((holder, index) => {
             console.log(`${index + 1}. ${holder.address} - ${holder.balance} tokens`);
         });
+        if (topHolders.length > 10) {
+            console.log(`... and ${topHolders.length - 10} more holders`);
+        }
         
-        console.log('✅ Top holders updated successfully');
+        console.log('✅ Top 20 holders updated successfully');
         return topHolders;
     }
 
     /**
-     * Simulate SOL reward distribution to top holders
+     * Simulate SOL reward distribution to top 20 holders (equal distribution)
      * @param {number} totalSOL - Total SOL amount to distribute
      */
     async simulateDistribution(totalSOL) {
-        console.log(`\n🎁 Distributing ${totalSOL} SOL to top holders:`);
+        console.log(`\n🎁 Distributing ${totalSOL} SOL equally among top 20 holders:`);
         
-        // Mock top holders for demonstration
+        // Mock top 20 holders for demonstration
         const mockHolders = [
             { address: 'H1LD3R1...abc123', balance: 1000000 },
             { address: 'H1LD3R2...def456', balance: 800000 },
             { address: 'H1LD3R3...ghi789', balance: 600000 },
             { address: 'H1LD3R4...jkl012', balance: 400000 },
-            { address: 'H1LD3R5...mno345', balance: 200000 },
+            { address: 'H1LD3R5...mno345', balance: 350000 },
+            { address: 'H1LD3R6...pqr678', balance: 300000 },
+            { address: 'H1LD3R7...stu901', balance: 250000 },
+            { address: 'H1LD3R8...vwx234', balance: 200000 },
+            { address: 'H1LD3R9...yza567', balance: 180000 },
+            { address: 'H1LD3R10...bcd890', balance: 160000 },
+            { address: 'H1LD3R11...efg123', balance: 140000 },
+            { address: 'H1LD3R12...hij456', balance: 120000 },
+            { address: 'H1LD3R13...klm789', balance: 100000 },
+            { address: 'H1LD3R14...nop012', balance: 90000 },
+            { address: 'H1LD3R15...qrs345', balance: 80000 },
+            { address: 'H1LD3R16...tuv678', balance: 70000 },
+            { address: 'H1LD3R17...wxy901', balance: 60000 },
+            { address: 'H1LD3R18...zab234', balance: 50000 },
+            { address: 'H1LD3R19...cde567', balance: 40000 },
+            { address: 'H1LD3R20...fgh890', balance: 30000 },
         ];
         
-        const totalBalance = mockHolders.reduce((sum, holder) => sum + holder.balance, 0);
+        // Equal distribution calculation
+        const equalShare = totalSOL / mockHolders.length;
         
-        console.log('Distribution breakdown:');
-        mockHolders.forEach((holder, index) => {
-            const shareSOL = (totalSOL * holder.balance) / totalBalance;
-            console.log(`${index + 1}. ${holder.address}: ${shareSOL.toFixed(4)} SOL (${((holder.balance / totalBalance) * 100).toFixed(2)}%)`);
+        console.log('Equal distribution breakdown:');
+        console.log(`Each holder receives: ${equalShare.toFixed(4)} SOL`);
+        console.log('Top 10 examples:');
+        mockHolders.slice(0, 10).forEach((holder, index) => {
+            console.log(`${index + 1}. ${holder.address}: ${equalShare.toFixed(4)} SOL (equal share)`);
         });
+        console.log(`... and 10 more holders receive ${equalShare.toFixed(4)} SOL each`);
         
-        console.log('✅ SOL distribution completed successfully');
+        console.log('✅ Equal SOL distribution completed successfully');
     }
 
     /**
@@ -151,18 +173,28 @@ async function runDemo() {
         // 1. Initialize the SOL reward pool
         const poolInfo = await manager.initializePool(poolOwner);
         
-        // 2. Update top holders (normally done by external monitoring script)
+        // 2. Update top 20 holders (normally done by external monitoring script)
         const holders = [
             { address: 'H1LD3R1...abc123', balance: 1000000 },
             { address: 'H1LD3R2...def456', balance: 800000 },
             { address: 'H1LD3R3...ghi789', balance: 600000 },
             { address: 'H1LD3R4...jkl012', balance: 400000 },
-            { address: 'H1LD3R5...mno345', balance: 200000 },
-            { address: 'H1LD3R6...pqr678', balance: 150000 },
-            { address: 'H1LD3R7...stu901', balance: 100000 },
-            { address: 'H1LD3R8...vwx234', balance: 80000 },
-            { address: 'H1LD3R9...yza567', balance: 50000 },
-            { address: 'H1LD3R10...bcd890', balance: 30000 },
+            { address: 'H1LD3R5...mno345', balance: 350000 },
+            { address: 'H1LD3R6...pqr678', balance: 300000 },
+            { address: 'H1LD3R7...stu901', balance: 250000 },
+            { address: 'H1LD3R8...vwx234', balance: 200000 },
+            { address: 'H1LD3R9...yza567', balance: 180000 },
+            { address: 'H1LD3R10...bcd890', balance: 160000 },
+            { address: 'H1LD3R11...efg123', balance: 140000 },
+            { address: 'H1LD3R12...hij456', balance: 120000 },
+            { address: 'H1LD3R13...klm789', balance: 100000 },
+            { address: 'H1LD3R14...nop012', balance: 90000 },
+            { address: 'H1LD3R15...qrs345', balance: 80000 },
+            { address: 'H1LD3R16...tuv678', balance: 70000 },
+            { address: 'H1LD3R17...wxy901', balance: 60000 },
+            { address: 'H1LD3R18...zab234', balance: 50000 },
+            { address: 'H1LD3R19...cde567', balance: 40000 },
+            { address: 'H1LD3R20...fgh890', balance: 30000 },
         ];
         
         await manager.updateTopHolders(holders);

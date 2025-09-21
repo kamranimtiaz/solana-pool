@@ -16,7 +16,7 @@ pub mod reward_pool {
         pool.owner = pool_owner;
         pool.total_rewards = 0;
         pool.total_distributed = 0;
-        pool.top_holders = Vec::with_capacity(10);
+        pool.top_holders = Vec::with_capacity(20);
         pool.bump = ctx.bumps.pool;
         pool.vault_bump = ctx.bumps.pool_vault;
         
@@ -30,7 +30,7 @@ pub mod reward_pool {
         ctx: Context<UpdateTopHolders>,
         holders: Vec<HolderInfo>,
     ) -> Result<()> {
-        require!(holders.len() <= 10, ErrorCode::TooManyHolders);
+        require!(holders.len() <= 20, ErrorCode::TooManyHolders);
         
         let pool = &mut ctx.accounts.pool;
         
@@ -43,7 +43,7 @@ pub mod reward_pool {
         // Sort holders by balance (descending) and take top 10
         let mut sorted_holders = holders;
         sorted_holders.sort_by(|a, b| b.balance.cmp(&a.balance));
-        sorted_holders.truncate(10);
+        sorted_holders.truncate(20);
         
         pool.top_holders = sorted_holders;
         
@@ -76,28 +76,22 @@ pub mod reward_pool {
         pool.total_rewards = available_rewards.checked_add(pool.total_distributed)
             .ok_or(ErrorCode::MathOverflow)?;
         
-        // Calculate total balance of top holders
-        let total_balance: u64 = pool.top_holders.iter().map(|h| h.balance).sum();
+        // Calculate equal share for all holders
+        let equal_share = available_rewards / (pool.top_holders.len() as u64);
         
-        if total_balance == 0 {
-            msg!("Total balance of holders is zero");
+        if equal_share == 0 {
+            msg!("Equal share amount is too small to distribute");
             return Ok(());
         }
 
-        let seeds = &[b"vault", &[pool.vault_bump]];
+        let seeds = &[b"vault".as_ref(), &[pool.vault_bump]];
         let signer = &[&seeds[..]];
         
         let mut total_distributed = 0u64;
 
-        // Distribute proportionally to each holder
+        // Distribute equally to each holder
         for (i, holder) in pool.top_holders.iter().enumerate() {
-            let holder_share = (available_rewards as u128)
-                .checked_mul(holder.balance as u128)
-                .ok_or(ErrorCode::MathOverflow)?
-                .checked_div(total_balance as u128)
-                .ok_or(ErrorCode::MathOverflow)? as u64;
-            
-            if holder_share > 0 && i < ctx.remaining_accounts.len() {
+            if i < ctx.remaining_accounts.len() {
                 let recipient_account = &ctx.remaining_accounts[i];
                 
                 // Verify the recipient is the expected holder address
@@ -118,12 +112,12 @@ pub mod reward_pool {
                     signer,
                 );
                 
-                system_program::transfer(cpi_ctx, holder_share)?;
+                system_program::transfer(cpi_ctx, equal_share)?;
                 
-                total_distributed = total_distributed.checked_add(holder_share)
+                total_distributed = total_distributed.checked_add(equal_share)
                     .ok_or(ErrorCode::MathOverflow)?;
                 
-                msg!("Transferred {} lamports to holder {}", holder_share, holder.address);
+                msg!("Transferred {} lamports equally to holder {}", equal_share, holder.address);
             }
         }
 
@@ -150,7 +144,7 @@ pub mod reward_pool {
         );
         
         // Transfer SOL from pool vault to owner
-        let seeds = &[b"vault", &[pool.vault_bump]];
+        let seeds = &[b"vault".as_ref(), &[pool.vault_bump]];
         let signer = &[&seeds[..]];
         
         let transfer_instruction = system_program::Transfer {
@@ -261,7 +255,7 @@ pub struct RewardPool {
     pub owner: Pubkey,              // Pool owner who can withdraw
     pub total_rewards: u64,         // Total rewards ever deposited
     pub total_distributed: u64,     // Total rewards distributed
-    pub top_holders: Vec<HolderInfo>, // Top 10 token holders
+    pub top_holders: Vec<HolderInfo>, // Top 20 token holders
     pub bump: u8,                   // Pool PDA bump
     pub vault_bump: u8,             // Vault PDA bump
 }
@@ -271,7 +265,7 @@ impl RewardPool {
         32 + // owner
         8 +  // total_rewards
         8 +  // total_distributed
-        4 + (10 * HolderInfo::SPACE) + // top_holders (max 10)
+        4 + (20 * HolderInfo::SPACE) + // top_holders (max 20)
         1 +  // bump
         1;   // vault_bump
 }
@@ -290,7 +284,7 @@ impl HolderInfo {
 pub enum ErrorCode {
     #[msg("Math operation overflow")]
     MathOverflow,
-    #[msg("Too many holders provided (max 10)")]
+    #[msg("Too many holders provided (max 20)")]
     TooManyHolders,
     #[msg("Unauthorized access")]
     Unauthorized,
