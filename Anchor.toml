@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-reward_pool = "5XdQS3UCAB1qiAjRC6eu1U5K5FH2KQ1Ak6C61SCfXAjw"
+reward_pool = "JDRA9xP88sQuiwYggwiUWgZ2V69fF9KC6GWm9s3AgvkS"
 
 [registry]
 url = "https://api.apr.dev"
