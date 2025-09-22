@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../../../../Desktop/codebase"
+		},
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"github.copilot.advanced": {},
+		"liveServer.settings.multiRootWorkspaceName": "codebase"
+	}
+}

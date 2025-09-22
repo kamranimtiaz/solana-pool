@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("5XdQS3UCAB1qiAjRC6eu1U5K5FH2KQ1Ak6C61SCfXAjw");
 
 #[program]
 pub mod reward_pool {
