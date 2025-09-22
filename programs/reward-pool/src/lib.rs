@@ -40,7 +40,7 @@ pub mod reward_pool {
             ErrorCode::Unauthorized
         );
         
-        // Sort holders by balance (descending) and take top 10
+        // Sort holders by balance (descending) and take top 20
         let mut sorted_holders = holders;
         sorted_holders.sort_by(|a, b| b.balance.cmp(&a.balance));
         sorted_holders.truncate(20);
@@ -52,7 +52,9 @@ pub mod reward_pool {
     }
 
     /// Distribute SOL rewards to top holders (must provide holder wallet addresses)
-    pub fn distribute_rewards(ctx: Context<DistributeRewards>) -> Result<()> {
+    pub fn distribute_rewards<'info>(
+        ctx: Context<'_, '_, '_, 'info, DistributeRewards<'info>>
+    ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         let available_rewards = ctx.accounts.pool_vault.lamports();
         
@@ -163,9 +165,7 @@ pub mod reward_pool {
         msg!("Pool owner withdrew {} lamports", amount);
         Ok(())
     }
-
 }
-
 
 #[derive(Accounts)]
 pub struct InitializePool<'info> {
@@ -180,20 +180,17 @@ pub struct InitializePool<'info> {
     
     /// CHECK: This PDA will receive SOL rewards automatically from Pump.fun
     #[account(
-        init,
-        payer = payer,
+        mut,
         seeds = [b"vault"],
-        bump,
-        space = 0
+        bump
     )]
-    pub pool_vault: SystemAccount<'info>,
+    pub pool_vault: UncheckedAccount<'info>,
     
     #[account(mut)]
     pub payer: Signer<'info>,
     
     pub system_program: Program<'info, System>,
 }
-
 
 #[derive(Accounts)]
 pub struct UpdateTopHolders<'info> {
@@ -222,7 +219,7 @@ pub struct DistributeRewards<'info> {
         seeds = [b"vault"],
         bump = pool.vault_bump
     )]
-    pub pool_vault: SystemAccount<'info>,
+    pub pool_vault: UncheckedAccount<'info>,
     
     pub system_program: Program<'info, System>,
 }
@@ -242,9 +239,9 @@ pub struct OwnerWithdraw<'info> {
         seeds = [b"vault"],
         bump = pool.vault_bump
     )]
-    pub pool_vault: SystemAccount<'info>,
+    pub pool_vault: UncheckedAccount<'info>,
     
-    #[account(constraint = owner.key() == pool.owner)]
+    #[account(mut, constraint = owner.key() == pool.owner)]
     pub owner: Signer<'info>,
     
     pub system_program: Program<'info, System>,
