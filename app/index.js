@@ -179,25 +179,16 @@ async function main() {
   const fakeHolders = await createFakeHolders(connection, provider);
   const holderInfos = buildHolderInfos(fakeHolders);
 
-  console.log('\n📊 Updating top holders on-chain...');
-  await program.methods
-    .updateTopHolders(holderInfos)
-    .accounts({
-      pool: poolPDA,
-      authority: provider.wallet.publicKey,
-    })
-    .rpc();
-  console.log('✅ Top holders updated');
-
   console.log('\n💰 Ensuring vault has SOL for distribution...');
   await seedVaultIfNeeded(provider, vaultPDA);
 
   console.log('\n🎁 Calling distribute_rewards...');
-  await program.methods
-    .distributeRewards()
+  const distributionBuilder = program.methods
+    .distributeRewards(holderInfos)
     .accounts({
       pool: poolPDA,
       poolVault: vaultPDA,
+      authority: provider.wallet.publicKey,
       systemProgram: SystemProgram.programId,
     })
     .remainingAccounts(
@@ -206,8 +197,14 @@ async function main() {
         isWritable: true,
         isSigner: false,
       }))
-    )
-    .rpc();
+    );
+
+  const distributionIx = await distributionBuilder.instruction();
+  const accountList = distributionIx.keys.map(({ pubkey }) => pubkey.toBase58());
+  console.log('   Accounts used:', accountList);
+
+  const distributionTx = new anchor.web3.Transaction().add(distributionIx);
+  await provider.sendAndConfirm(distributionTx, []);
   console.log('✅ Distribution transaction submitted');
 
   const updatedPool = await program.account.rewardPool.fetch(poolPDA);

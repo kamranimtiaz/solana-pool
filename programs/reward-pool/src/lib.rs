@@ -24,7 +24,8 @@ pub mod reward_pool {
         Ok(())
     }
 
-    /// Register/update top token holders (called periodically or by external script)
+    /*
+    /// Register/update top token holders (legacy function kept for reference)
     pub fn update_top_holders(
         ctx: Context<UpdateTopHolders>,
         holders: Vec<HolderInfo>,
@@ -49,27 +50,26 @@ pub mod reward_pool {
         msg!("Updated top {} holders", pool.top_holders.len());
         Ok(())
     }
+    */
 
-    /// Distribute SOL rewards to top holders (must provide holder wallet addresses)
+    /// Distribute SOL rewards to provided holders (owner only)
     pub fn distribute_rewards<'info>(
-        ctx: Context<'_, '_, '_, 'info, DistributeRewards<'info>>
+        ctx: Context<'_, '_, '_, 'info, DistributeRewards<'info>>,
+        holders: Vec<HolderInfo>,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
+        let authority = &ctx.accounts.authority;
         let available_rewards = ctx.accounts.pool_vault.lamports();
         
         if available_rewards == 0 {
             msg!("No SOL rewards to distribute");
             return Ok(());
         }
-        
-        if pool.top_holders.is_empty() {
-            msg!("No top holders registered for distribution");
-            return Ok(());
-        }
-        
-        // Verify we have enough remaining accounts (must match top holders count)
+        require!(authority.key() == pool.owner, ErrorCode::Unauthorized);
+        require!(!holders.is_empty(), ErrorCode::NoHoldersProvided);
+        require!(holders.len() <= 20, ErrorCode::TooManyHolders);
         require!(
-            ctx.remaining_accounts.len() >= pool.top_holders.len(),
+            ctx.remaining_accounts.len() >= holders.len(),
             ErrorCode::InsufficientAccounts
         );
         
@@ -78,7 +78,7 @@ pub mod reward_pool {
             .ok_or(ErrorCode::MathOverflow)?;
         
         // Calculate equal share for all holders
-        let equal_share = available_rewards / (pool.top_holders.len() as u64);
+        let equal_share = available_rewards / (holders.len() as u64);
         
         if equal_share == 0 {
             msg!("Equal share amount is too small to distribute");
@@ -91,7 +91,7 @@ pub mod reward_pool {
         let mut total_distributed = 0u64;
 
         // Distribute equally to each holder
-        for (i, holder) in pool.top_holders.iter().enumerate() {
+        for (i, holder) in holders.iter().enumerate() {
             if i < ctx.remaining_accounts.len() {
                 let recipient_account = &ctx.remaining_accounts[i];
                 
@@ -125,7 +125,7 @@ pub mod reward_pool {
         pool.total_distributed = pool.total_distributed.checked_add(total_distributed)
             .ok_or(ErrorCode::MathOverflow)?;
         
-        msg!("Distributed {} lamports to {} holders", total_distributed, pool.top_holders.len());
+        msg!("Distributed {} lamports to {} holders", total_distributed, holders.len());
         Ok(())
     }
 
@@ -191,17 +191,17 @@ pub struct InitializePool<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct UpdateTopHolders<'info> {
-    #[account(
-        mut,
-        seeds = [b"pool"],
-        bump = pool.bump
-    )]
-    pub pool: Account<'info, RewardPool>,
-    
-    pub authority: Signer<'info>,
-}
+// #[derive(Accounts)]
+// pub struct UpdateTopHolders<'info> {
+//     #[account(
+//         mut,
+//         seeds = [b"pool"],
+//         bump = pool.bump
+//     )]
+//     pub pool: Account<'info, RewardPool>,
+//     
+//     pub authority: Signer<'info>,
+// }
 
 #[derive(Accounts)]
 pub struct DistributeRewards<'info> {
@@ -219,6 +219,8 @@ pub struct DistributeRewards<'info> {
         bump = pool.vault_bump
     )]
     pub pool_vault: UncheckedAccount<'info>,
+
+    pub authority: Signer<'info>,
     
     pub system_program: Program<'info, System>,
 }
@@ -290,4 +292,6 @@ pub enum ErrorCode {
     InvalidRecipient,
     #[msg("Insufficient balance for withdrawal")]
     InsufficientBalance,
+    #[msg("No holders provided for distribution")]
+    NoHoldersProvided,
 }
